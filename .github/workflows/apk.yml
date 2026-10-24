@@ -1,0 +1,196 @@
+name: Build APK
+
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create project files
+        run: |
+          cat > settings.gradle.kts <<'EOF_0'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "BedrockLauncher"
+          include(":app")
+          EOF_0
+          cat > build.gradle.kts <<'EOF_1'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF_1
+          mkdir -p app
+          cat > app/build.gradle.kts <<'EOF_2'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.example.bedrocklauncher"
+              compileSdk = 34
+              defaultConfig {
+                  applicationId = "com.example.bedrocklauncher"
+                  minSdk = 24
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+          EOF_2
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml <<'EOF_3'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <queries>
+                  <package android:name="com.mojang.minecraftpe" />
+              </queries>
+              <application
+                  android:label="Bedrock Launcher"
+                  android:theme="@android:style/Theme.Material.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF_3
+          mkdir -p app/src/main/java/com/example/bedrocklauncher
+          cat > app/src/main/java/com/example/bedrocklauncher/MainActivity.kt <<'EOF_4'
+          package com.example.bedrocklauncher
+
+          import android.app.Activity
+          import android.content.ActivityNotFoundException
+          import android.content.Intent
+          import android.content.pm.PackageManager
+          import android.graphics.Color
+          import android.net.Uri
+          import android.os.Bundle
+          import android.view.Gravity
+          import android.widget.Button
+          import android.widget.LinearLayout
+          import android.widget.TextView
+          import android.widget.Toast
+
+          class MainActivity : Activity() {
+
+              private val pkg = "com.mojang.minecraftpe"
+              private lateinit var status: TextView
+              private lateinit var play: Button
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+
+                  val root = LinearLayout(this)
+                  root.orientation = LinearLayout.VERTICAL
+                  root.gravity = Gravity.CENTER
+                  root.setBackgroundColor(Color.parseColor("#1E2A1E"))
+                  root.setPadding(64, 64, 64, 64)
+
+                  val title = TextView(this)
+                  title.text = "Bedrock Launcher"
+                  title.textSize = 28f
+                  title.setTextColor(Color.WHITE)
+                  title.gravity = Gravity.CENTER
+                  root.addView(title)
+
+                  status = TextView(this)
+                  status.textSize = 16f
+                  status.setTextColor(Color.parseColor("#B7D9B0"))
+                  status.gravity = Gravity.CENTER
+                  status.setPadding(0, 32, 0, 96)
+                  root.addView(status)
+
+                  play = Button(this)
+                  play.textSize = 22f
+                  play.setOnClickListener { onPlay() }
+                  root.addView(
+                      play,
+                      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 220)
+                  )
+
+                  setContentView(root)
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  val version = installedVersion()
+                  if (version != null) {
+                      status.text = "Minecraft установлен (версия " + version + ")"
+                      play.text = "ИГРАТЬ"
+                  } else {
+                      status.text = "Minecraft не найден на этом устройстве"
+                      play.text = "УСТАНОВИТЬ ИЗ GOOGLE PLAY"
+                  }
+              }
+
+              private fun installedVersion(): String? {
+                  return try {
+                      packageManager.getPackageInfo(pkg, 0).versionName
+                  } catch (e: PackageManager.NameNotFoundException) {
+                      null
+                  }
+              }
+
+              private fun onPlay() {
+                  val intent = packageManager.getLaunchIntentForPackage(pkg)
+                  if (intent != null) {
+                      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                      startActivity(intent)
+                      return
+                  }
+                  try {
+                      startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=" + pkg)))
+                  } catch (e: ActivityNotFoundException) {
+                      try {
+                          startActivity(
+                              Intent(
+                                  Intent.ACTION_VIEW,
+                                  Uri.parse("https://play.google.com/store/apps/details?id=" + pkg)
+                              )
+                          )
+                      } catch (e2: ActivityNotFoundException) {
+                          Toast.makeText(this, "Не удалось открыть магазин", Toast.LENGTH_LONG).show()
+                      }
+                  }
+              }
+          }
+          EOF_4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BedrockLauncher-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
